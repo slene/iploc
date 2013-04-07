@@ -2,6 +2,8 @@
 
 字节序使用 **little-endian**，使用其他字节序的主机需要自行处理。
 
+ps: **little-endian** 中数字是倒序的，其他是正常排序。
+
 [Wikipedia 操作系统和架构对应的字节序](https://en.wikipedia.org/wiki/Endianness#Endianness_and_operating_systems_on_architectures)
 
 # 文件结构图示：
@@ -18,10 +20,10 @@
 |------------|-------------|------------|
 |6a 5f 2a 00 |c8 10 02 00  |58 eb 01 00 |
 
-ps: 上面的12个字节示例，当文件里IP数据改变时会有变化。
+ps: 上面的12个字节只是示例，当文件里IP数据改变时会有变化，以实际为准。
 
 ## 文本区
-每一段文本 string 都以字节 0x00 结束，
+每一段文本 string 都以字节 0x00 结束，所有文字数据都是UTF-8编码的。
 
 ## 数据区
 每 21 个字节为一段，其顺序为：
