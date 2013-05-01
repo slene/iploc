@@ -5,6 +5,7 @@ import (
 	"github.com/slene/iploc"
 	"os"
 	"path/filepath"
+	. "testing"
 )
 
 func init() {
@@ -49,6 +50,30 @@ func testIp(ipAddr string) {
 	fmt.Print("\n")
 }
 
+func testSpeed() {
+	r := Benchmark(func(b *B){
+		ips := []string{
+			"0.0.0.0",
+			"127.0.0.1",
+			"169.254.0.1",
+			"192.168.1.1",
+			"10.0.0.0",
+			"255.255.255.255",
+			"112.226.155.1",
+			"121.18.72.0",
+			"6.18.72.0",
+			"200.18.72.0",
+		}
+		for i := 0; i < b.N; i++ {
+			for _, ipAddr := range ips {
+				iploc.GetIpInfo(ipAddr)
+			}
+		}
+	})
+	fmt.Println(r)
+	fmt.Printf("10w次查询: %.1f 毫秒", float64(r.NsPerOp()) / 100000000 * 1000 / 10 * 100000)
+}
+
 func main() {
 	testIp("0.0.0.0")
 	testIp("127.0.0.1")
@@ -58,4 +83,6 @@ func main() {
 	testIp("255.255.255.255")
 	testIp("112.226.155.1")
 	testIp("121.18.72.0")
+
+	testSpeed()
 }
