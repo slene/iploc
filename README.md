@@ -63,7 +63,9 @@ ps: 上述公式里“索引地址”表示从索引起始地址开始的字节�
 
 ## 使用方法
 
-参见 example 里的例子
+    go get github.com/slene/iploc
+
+api 调用方法，参见 example 里的例子
 
 ## TODO
 
