@@ -12,8 +12,13 @@ func init() {
 	// replace iplocFilePath to your iploc.dat path
 	iplocFilePath, _ := filepath.Abs("src/github.com/slene/iploc/iploc.dat")
 
-	// read iploc.dat into memory
-	iploc.IpLocInit(iplocFilePath)
+	// simple set a true param can preload all ipinfo
+	// need allocate more memory > 30M
+	// and speed can grow up about 40 percent than not preload
+	iploc.IpLocInit(iplocFilePath, true)
+
+	// read iploc.dat into memory, not preload
+	// iploc.IpLocInit(iplocFilePath)
 }
 
 func testIp(ipAddr string) {
@@ -23,8 +28,7 @@ func testIp(ipAddr string) {
 		os.Exit(1)
 	}
 
-	fmt.Println(ipinfo.Ip)
-	fmt.Println(ipinfo.IpLong)
+	fmt.Println(ipAddr)
 
 	switch ipinfo.Flag {
 	case iploc.FLAG_INUSE:
@@ -51,7 +55,7 @@ func testIp(ipAddr string) {
 }
 
 func testSpeed() {
-	r := Benchmark(func(b *B){
+	r := Benchmark(func(b *B) {
 		ips := []string{
 			"0.0.0.0",
 			"127.0.0.1",
@@ -71,7 +75,7 @@ func testSpeed() {
 		}
 	})
 	fmt.Println(r)
-	fmt.Printf("10w次查询: %.1f 毫秒", float64(r.NsPerOp()) / 100000000 * 1000 / 10 * 100000)
+	fmt.Printf("10w次查询: %.1f 毫秒\n", float64(r.NsPerOp())/100000000*1000*100000/10)
 }
 
 func main() {

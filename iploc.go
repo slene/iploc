@@ -288,7 +288,13 @@ const FLAG_INUSE = 1 << 1
 // IANA未分配地址
 const FLAG_NOTUSE = 1 << 2
 
-func ip2long(ipAddr string) (uint32, error) {
+var (
+	inited    bool
+	preloaded bool
+	instance  *ipLoc
+)
+
+func Ip2long(ipAddr string) (uint32, error) {
 	ip := net.ParseIP(ipAddr)
 	if ip == nil {
 		return 0, errors.New("wrong ipAddr format")
@@ -297,7 +303,7 @@ func ip2long(ipAddr string) (uint32, error) {
 	return binary.BigEndian.Uint32(ip), nil
 }
 
-func long2ip(ipLong uint32) string {
+func Long2ip(ipLong uint32) string {
 	ipByte := make([]byte, 4)
 	binary.BigEndian.PutUint32(ipByte, ipLong)
 	ip := net.IP(ipByte)
@@ -305,93 +311,52 @@ func long2ip(ipLong uint32) string {
 }
 
 var ipData = &struct {
-	repo       []byte
-	indexStart uint32
-	indexNums  uint32
-	dataStart  uint32
-	loaded     bool
+	repo        []byte
+	size        uint32
+	indexStart  uint32
+	indexNums   uint32
+	dataStart   uint32
+	loaded      bool
+	cachedIndex []uint32
+	cachedData  map[uint32]*IpInfo
 }{}
 
 type IpInfo struct {
-	Ip                               string
-	IpLong                           uint32
 	Flag                             uint8
 	Code, Country, Region, City, Isp string
 	Note                             string
 }
 
-type Store struct {
-	data   []byte
-	length uint32
-	cursor uint32
-}
-
-func (s *Store) Tell() uint32 {
-	return s.cursor
-}
-
-func (s *Store) Seek(n uint32) {
-	if n > s.length {
-		s.cursor = s.length
-	} else {
-		s.cursor = n
-	}
-}
-
-func (s *Store) Read(n uint32) (result []byte) {
-	if n > 0 && s.cursor < s.length {
-		result = s.data[s.cursor : s.cursor+n]
-		s.Seek(s.cursor + n)
-	}
-	return
-}
-
-func (s *Store) ReadUntil(char byte, params ...uint8) (result []byte) {
-	var i, max uint8
-	max = 255
-	if len(params) > 0 {
-		max = params[0]
-	}
-	start := s.cursor
-	for {
-		if i == max {
-			break
-		}
-		chars := s.Read(1)
-		if chars == nil {
-			break
-		}
-		if chars[0] == char {
-			result = s.data[start : s.cursor-1]
-			return
-		}
-		i++
-	}
-	return
-}
-
-func NewStore(data []byte) *Store {
-	return &Store{data, uint32(len(data)), 0}
-}
-
-type ipLoc struct {
-	store      *Store
-	indexStart uint32
-	dataStart  uint32
-	indexNums  uint32
-}
+type ipLoc struct{}
 
 func (ip *ipLoc) findOffset(ipLong uint32, start uint32, end uint32) uint32 {
 find:
 	if end-start <= 1 {
-		return start*9 + ip.dataStart
+		return start*9 + ipData.dataStart
 	}
 
 	middle := (end-start)/2 + start
-	middleOffset := ip.indexStart + middle*4
+	middleOffset := ipData.indexStart + middle*4
 
-	ip.store.Seek(middleOffset)
-	ipLong2 := binary.LittleEndian.Uint32(ip.store.Read(4))
+	ipLong2 := binary.LittleEndian.Uint32(ipData.repo[middleOffset : middleOffset+4])
+
+	if ipLong < ipLong2 {
+		end = middle
+	} else {
+		start = middle
+	}
+	goto find
+	return 0
+}
+
+func (ip *ipLoc) findIpLongInCache(ipLong uint32, start uint32, end uint32) uint32 {
+find:
+	if end-start <= 1 {
+		return ipData.cachedIndex[start]
+	}
+
+	middle := (end-start)/2 + start
+	ipLong2 := ipData.cachedIndex[middle]
 
 	if ipLong < ipLong2 {
 		end = middle
@@ -403,7 +368,12 @@ find:
 }
 
 func (ip *ipLoc) readAsString(str *string, data []byte, bits uint8) {
-	var index uint32
+	var (
+		index  uint32
+		result []byte
+		chars  []byte
+		i, max uint8
+	)
 	switch bits {
 	case 16:
 		index = uint32(binary.LittleEndian.Uint16(data))
@@ -411,27 +381,39 @@ func (ip *ipLoc) readAsString(str *string, data []byte, bits uint8) {
 		index = binary.LittleEndian.Uint32(data)
 	}
 	if index > 0 {
-		ip.store.Seek(index)
-		s := ip.store.ReadUntil(0x0)
-		if s != nil {
-			*str = string(s)
+		max = 255
+		cursor := index
+		for {
+			if i == max {
+				break
+			}
+			if cursor+1 > ipData.size {
+				chars = nil
+			} else {
+				chars = ipData.repo[cursor : cursor+1]
+			}
+			cursor += 1
+			if chars == nil {
+				break
+			}
+			if chars[0] == 0x0 {
+				result = ipData.repo[index : cursor-1]
+				break
+			}
+			i++
+		}
+
+		if result != nil {
+			*str = string(result)
 		}
 	}
 }
 
-func (ip *ipLoc) readBlock(ipAddr string, ipLong uint32, offset uint32) (info *IpInfo) {
-	store := ip.store
-	store.Seek(offset)
-
-	info = &IpInfo{}
-
-	info.Ip = ipAddr
-	info.IpLong = ipLong
-
-	data := store.Read(9)
-
+func (ip *ipLoc) readBlock(ipLong uint32, offset uint32) (info *IpInfo) {
+	data := ipData.repo[offset : offset+9]
 	flag := uint8(data[0])
 
+	info = &IpInfo{}
 	info.Flag = flag
 
 	if flag == FLAG_INUSE {
@@ -461,31 +443,34 @@ func (ip *ipLoc) readBlock(ipAddr string, ipLong uint32, offset uint32) (info *I
 	return
 }
 
-func (ip *ipLoc) getInfo(ipAddr string) (info *IpInfo, err error) {
+func (ip *ipLoc) GetInfo(ipAddr string) (info *IpInfo, err error) {
 	if inited == false {
 		return nil, errors.New("iploc file not inited")
 	}
 
-	ipLong, er := ip2long(ipAddr)
+	ipLong, er := Ip2long(ipAddr)
 	if er != nil {
 		err = er
 		return
 	}
 
-	offset := ip.findOffset(ipLong, 0, ip.indexNums)
-	info = ip.readBlock(ipAddr, ipLong, offset)
+	if preloaded {
+		offset := ip.findIpLongInCache(ipLong, 0, ipData.indexNums)
+		inf := ipData.cachedData[offset]
+		info = inf
+	} else {
+		offset := ip.findOffset(ipLong, 0, ipData.indexNums)
+		info = ip.readBlock(ipLong, offset)
+	}
+
 	return
 }
 
 func NewIpLoc() *ipLoc {
-	return &ipLoc{NewStore(ipData.repo), ipData.indexStart, ipData.dataStart, ipData.indexNums}
+	return new(ipLoc)
 }
 
-var (
-	inited bool
-)
-
-func IpLocInit(IPDatPath string) {
+func IpLocInit(IPDatPath string, params ...interface{}) {
 	if inited {
 		return
 	}
@@ -496,7 +481,8 @@ func IpLocInit(IPDatPath string) {
 		os.Exit(1)
 	}
 
-	ipData.repo = make([]byte, fi.Size())
+	ipData.size = uint32(fi.Size())
+	ipData.repo = make([]byte, ipData.size)
 	file, _ := os.Open(IPDatPath)
 	file.Read(ipData.repo)
 
@@ -505,10 +491,41 @@ func IpLocInit(IPDatPath string) {
 	ipData.dataStart = binary.LittleEndian.Uint32(ipData.repo[4:8])
 	ipData.indexNums = binary.LittleEndian.Uint32(ipData.repo[8:12])
 
+	var preload bool
+	for _, v := range params {
+		switch b := v.(type) {
+		case bool:
+			preload = b
+		}
+	}
+
+	if preload {
+		ipData.cachedIndex = make([]uint32, ipData.indexNums)
+		ipData.cachedData = make(map[uint32]*IpInfo, ipData.indexNums)
+
+		var (
+			i      uint32
+			offset uint32
+		)
+		ip := NewIpLoc()
+		for i = 0; i < ipData.indexNums; i++ {
+			offset = ipData.indexStart + i*4
+			iplong := binary.LittleEndian.Uint32(ipData.repo[offset : offset+4])
+			ipData.cachedIndex[i] = iplong
+			ipData.cachedData[iplong] = ip.readBlock(iplong, i*9+ipData.dataStart)
+		}
+
+		preloaded = preload
+	}
+
+	if instance == nil {
+		instance = NewIpLoc()
+	}
+
 	inited = true
 }
 
+// GetIpInfo are all times thread safe
 func GetIpInfo(ipAddr string) (*IpInfo, error) {
-	ip := NewIpLoc()
-	return ip.getInfo(ipAddr)
+	return instance.GetInfo(ipAddr)
 }
