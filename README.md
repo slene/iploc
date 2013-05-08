@@ -61,6 +61,12 @@ ps: 上面的12个字节只是示例，当文件里IP数据改变时会有变化
 
 ps: 上述公式里“索引地址”表示从索引起始地址开始的字节长度
 
+## 演示页面
+
+[http://iploc.nil.pw](http://iploc.nil.pw)
+
+powered by [Heroku](https://www.heroku.com)
+
 ## 使用方法
 
     go get github.com/slene/iploc
